@@ -11,7 +11,7 @@ ID2 = '211670849'
 
 # Choose parameters
 WINDOW_SIZE_TAU = 5  # Add your value here!
-MAX_ITER_TAU = 5  # Add your value here!
+MAX_ITER_TAU = 2  # Add your value here!
 NUM_LEVELS_TAU = 5  # Add your value here!
 
 
@@ -51,7 +51,7 @@ def calc_mean_mse_video(path: str) -> float:
 
 
 # Load video file
-input_video_name = 'input2.avi'
+input_video_name = 'INPUT.avi'
 
 output_video_name = f'{ID1}_{ID2}_stabilized_video.avi'
 start_time = time.time()

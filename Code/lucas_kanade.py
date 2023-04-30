@@ -1,7 +1,8 @@
 import cv2
 import numpy as np
 from scipy import signal
-from scipy.interpolate import RectBivariateSpline
+from scipy.interpolate import RectBivariateSpline, interp2d
+
 
 
 
@@ -66,7 +67,6 @@ def build_pyramid(image: np.ndarray, num_levels: int) -> list[np.ndarray]:
         img_lev = img_lev[0:h:2, 0:w:2]
         pyramid.append(img_lev)
     return pyramid
-
 
 def my_warp_image(image: np.ndarray, u: np.ndarray, v: np.ndarray) -> np.ndarray:
     h, w = image.shape
