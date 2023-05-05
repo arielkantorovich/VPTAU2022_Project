@@ -260,3 +260,169 @@ def lucas_kanade_video_stabilization(input_video_path: str,
     cap.release()
     out.release()
     cv2.destroyAllWindows()
+
+
+def faster_lucas_kanade_step(I1: np.ndarray,
+                             I2: np.ndarray,
+                             window_size: int) -> tuple[np.ndarray, np.ndarray]:
+    du = np.zeros(I1.shape)
+    dv = np.zeros(I1.shape)
+    """INSERT YOUR CODE HERE. Calculate du and dv correctly"""
+    FACTOR = 50
+    if min(I1.shape) < FACTOR * window_size:
+        return my_lucas_kanade_step(I1, I2, window_size)
+    else:
+        h, w = I1.shape
+        haris_response = cv2.cornerHarris(src=np.float32(I2), blockSize=5, k=0.05, ksize=3)
+        corners = np.where(haris_response > 0.01 * haris_response.max())
+        corners = np.transpose(corners)
+        # Step1:
+        Ix = signal.convolve2d(in1=I2, in2=X_DERIVATIVE_FILTER, mode='same', boundary='symm')
+        Iy = signal.convolve2d(in1=I2, in2=Y_DERIVATIVE_FILTER, mode='same', boundary='symm')
+        # Step2:
+        It = I2 - I1
+        # Step3:
+        Ixx = Ix * Ix
+        Iyy = Iy * Iy
+        Ixy = Ix * Iy
+        Ixt = -1 * Ix * It
+        Iyt = -1 * Iy * It
+
+        # Compute sliding windows for the arrays
+        window_shape = (window_size, window_size)
+        Ixx_windows = np.lib.stride_tricks.sliding_window_view(Ixx, window_shape)
+        Iyy_windows = np.lib.stride_tricks.sliding_window_view(Iyy, window_shape)
+        Ixy_windows = np.lib.stride_tricks.sliding_window_view(Ixy, window_shape)
+        Ixt_windows = np.lib.stride_tricks.sliding_window_view(Ixt, window_shape)
+        Iyt_windows = np.lib.stride_tricks.sliding_window_view(Iyt, window_shape)
+
+        # Compute windows only around interest points
+        y, x = corners[:, 0], corners[:, 1]
+        y, x = np.clip(y, 0, Ixx_windows.shape[0]-1), np.clip(x, 0, Ixx_windows.shape[1]-1)
+        Ixx_windows_at_interest_points = Ixx_windows[y, x, :, :].reshape((len(corners), window_size, window_size, 1, 1))
+        Iyy_windows_at_interest_points = Iyy_windows[y, x, :, :].reshape((len(corners), window_size, window_size, 1, 1))
+        Ixy_windows_at_interest_points = Ixy_windows[y, x, :, :].reshape((len(corners), window_size, window_size, 1, 1))
+        Ixt_windows_at_interest_points = Ixt_windows[y, x, :, :].reshape((len(corners), window_size, window_size, 1, 1))
+        Iyt_windows_at_interest_points = Iyt_windows[y, x, :, :].reshape((len(corners), window_size, window_size, 1, 1))
+
+        # Calculate ATA and b using vectorized operations
+        ATA_11 = np.sum(Ixx_windows_at_interest_points, axis=(1, 2, 3))
+        ATA_12 = np.sum(Ixy_windows_at_interest_points, axis=(1, 2, 3))
+        ATA_21 = ATA_12
+        ATA_22 = np.sum(Iyy_windows_at_interest_points, axis=(1, 2, 3))
+        ATA = np.stack([np.stack([ATA_11, ATA_12], axis=-1), np.stack([ATA_21, ATA_22], axis=-1)], axis=-2)
+        b_1 = np.sum(Ixt_windows_at_interest_points, axis=(1, 2, 3))[:, :, np.newaxis]
+        b_2 = np.sum(Iyt_windows_at_interest_points, axis=(1, 2, 3))[:, :, np.newaxis]
+        b = np.concatenate([b_1, b_2], axis=-1)
+
+        # Calculate U_V_LS using vectorized operations
+        U_V_LS = np.zeros((h, w, 2))
+        U_V_LS[y, x] = np.linalg.solve(ATA, b).squeeze()
+        du, dv = U_V_LS[:, :, 0], U_V_LS[:, :, 1]
+        return du, dv
+
+def faster_lucas_kanade_optical_flow(
+        I1: np.ndarray, I2: np.ndarray, window_size: int, max_iter: int,
+        num_levels: int) -> tuple[np.ndarray, np.ndarray]:
+    """Calculate LK Optical Flow for max iterations in num-levels .
+    Use faster_lucas_kanade_step instead of lucas_kanade_step.
+    Args:
+        I1: np.ndarray. Image at time t.
+        I2: np.ndarray. Image at time t+1.
+        window_size: int. The window is of shape window_size X window_size.
+        max_iter: int. Maximal number of LK-steps for each level of the pyramid.
+        num_levels: int. Number of pyramid levels.
+    Returns:
+        (u, v): tuple of np.ndarray-s. Each one of the shape of the
+        original image. v encodes the shift in rows and u in columns.
+    """
+    DOWN_FACTOR = 2
+    h_factor = int(np.ceil(I1.shape[0] / (2 ** num_levels)))
+    w_factor = int(np.ceil(I1.shape[1] / (2 ** num_levels)))
+    IMAGE_SIZE = (w_factor * (2 ** num_levels),
+                  h_factor * (2 ** num_levels))
+    if I1.shape != IMAGE_SIZE:
+        I1 = cv2.resize(I1, IMAGE_SIZE)
+    if I2.shape != IMAGE_SIZE:
+        I2 = cv2.resize(I2, IMAGE_SIZE)
+    pyramid_I1 = build_pyramid(I1, num_levels)  # create levels list for I1
+    pyarmid_I2 = build_pyramid(I2, num_levels)  # create levels list for I1
+    u = np.zeros(pyarmid_I2[-1].shape)  # create u in the size of smallest image
+    v = np.zeros(pyarmid_I2[-1].shape)  # create v in the size of smallest image
+    """INSERT YOUR CODE HERE.
+    Replace u and v with their true value."""
+    for level in range(num_levels, -1, -1):
+        I2_warp = my_warp_image(pyarmid_I2[level], u, v)
+        for iter in range(max_iter):
+            du, dv = faster_lucas_kanade_step(I1=pyramid_I1[level], I2=I2_warp, window_size=window_size)
+            u += du
+            v += dv
+            I2_warp = my_warp_image(pyarmid_I2[level], u, v)
+        if level > 0:
+            h_scale, w_scale = pyarmid_I2[level - 1].shape
+            u = cv2.resize(u, (w_scale, h_scale)) * DOWN_FACTOR
+            v = cv2.resize(v, (w_scale, h_scale)) * DOWN_FACTOR
+    return u, v
+
+def lucas_kanade_faster_video_stabilization_fix_effects(
+        input_video_path: str, output_video_path: str, window_size: int,
+        max_iter: int, num_levels: int, start_rows: int = 10,
+        start_cols: int = 2, end_rows: int = 30, end_cols: int = 30) -> None:
+    """Calculate LK Optical Flow to stabilize the video and save it to file.
+    Args:
+        input_video_path: str. path to input video.
+        output_video_path: str. path to output stabilized video.
+        window_size: int. The window is of shape window_size X window_size.
+        max_iter: int. Maximal number of LK-steps for each level of the pyramid.
+        num_levels: int. Number of pyramid levels.
+        start_rows: int. The number of lines to cut from top.
+        end_rows: int. The number of lines to cut from bottom.
+        start_cols: int. The number of columns to cut from left.
+        end_cols: int. The number of columns to cut from right.
+    Returns:
+        None.
+    """
+    """INSERT YOUR CODE HERE."""
+    cap = cv2.VideoCapture(input_video_path)
+    params = get_video_parameters(cap)
+    out = cv2.VideoWriter(output_video_path, fourcc=cv2.VideoWriter_fourcc(*'XVID'), fps=params["fps"],
+                          frameSize=(params["width"], params["height"]), isColor=False)
+    ret, frame = cap.read()
+    gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    out.write(gray_frame[start_rows:gray_frame.shape[0]-end_rows, start_cols:gray_frame.shape[1]-end_cols])
+
+    h_factor = int(np.ceil(gray_frame.shape[0] / (2 ** (num_levels - 1 + 1))))
+    w_factor = int(np.ceil(gray_frame.shape[1] / (2 ** (num_levels - 1 + 1))))
+    IMAGE_SIZE = (w_factor * (2 ** (num_levels - 1 + 1)), h_factor * (2 ** (num_levels - 1 + 1)))
+    gray_frame = cv2.resize(gray_frame, IMAGE_SIZE)
+    u = np.zeros(gray_frame.shape, dtype=np.float)
+    v = np.zeros(gray_frame.shape, dtype=np.float)
+    prev_frame = gray_frame
+    while cap.isOpened():
+        ret, frame = cap.read()
+        if ret:
+            gray_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            gray_frame = cv2.resize(gray_frame, IMAGE_SIZE)
+            du, dv = faster_lucas_kanade_optical_flow(I1=prev_frame, I2=gray_frame, window_size=window_size, max_iter=max_iter, num_levels=num_levels)
+            r_low_u, r_high_u = window_size // 2, du.shape[0] - window_size // 2
+            c_low_u, c_high_u = window_size // 2, du.shape[1] - window_size // 2
+            r_low_v, r_high_v = window_size // 2, dv.shape[0] - window_size // 2
+            c_low_v, c_high_v = window_size // 2, dv.shape[1] - window_size // 2
+            du_mean, dv_mean = np.mean(du[r_low_u:r_high_u, c_low_u:c_high_u]), np.mean(
+                dv[r_low_v:r_high_v, c_low_v:c_high_v])
+            # Part D
+            u[r_low_u:r_high_u, c_low_u:c_high_u] += du_mean
+            v[r_low_v:r_high_v, c_low_v:c_high_v] += dv_mean
+            # Part E
+            warp_frame = my_warp_image(gray_frame, u, v)
+            warp_frame = warp_frame[start_rows:gray_frame.shape[0]-end_rows, start_cols:gray_frame.shape[1]-end_cols]
+            warp_frame = cv2.resize(warp_frame, (params["width"], params["height"]))
+            out.write(warp_frame.astype('uint8'))
+            prev_frame = gray_frame
+
+        else:
+            break
+
+    cap.release()
+    out.release()
+    cv2.destroyAllWindows()

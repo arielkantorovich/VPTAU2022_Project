@@ -50,7 +50,7 @@ for i in range(n_frames):
                                        maxCorners=200,
                                        qualityLevel=0.01,
                                        minDistance=30,
-                                       blockSize=3)
+                                       blockSize=5)
     # Read next frame
     success, curr = cap.read()
     if not success:
