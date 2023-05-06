@@ -18,6 +18,34 @@ def get_video_parameters(capture: cv2.VideoCapture) -> dict:
             "frame_count": frame_count}
 
 
+def movingAverage(curve, radius):
+  window_size = 2 * radius + 1
+  # Define the filter
+  f = np.ones(window_size)/window_size
+  # Add padding to the boundaries
+  curve_pad = np.lib.pad(curve, (radius, radius), 'edge')
+  # Apply convolution
+  curve_smoothed = np.convolve(curve_pad, f, mode='same')
+  # Remove padding
+  curve_smoothed = curve_smoothed[radius:-radius]
+  # return smoothed curve
+  return curve_smoothed
+
+def smooth(trajectory, n_transform=9, SMOOTHING_RADIUS = 5):
+    smoothed_trajectory = np.copy(trajectory)
+    # Filter the x, y and angle curves
+    for i in range(n_transform):
+        smoothed_trajectory[:, i] = movingAverage(trajectory[:, i], radius=SMOOTHING_RADIUS)
+
+    return smoothed_trajectory
+
+def fixBorder(frame: np.ndarray) -> np.ndarray:
+    (h, w, channels) = frame.shape
+    T = cv2.getRotationMatrix2D((w / 2, h / 2), 0, 1.04)
+    frame = cv2.warpAffine(frame, T, (w, h))
+    return frame
+
+###############################################################################################################################
 # Initialize parameters
 # FILL IN YOUR ID
 ID1 = '308345891'
@@ -42,15 +70,20 @@ prev_gray = cv2.cvtColor(prev, cv2.COLOR_BGR2GRAY)
 
 ######################## Step 3: Find motion between frames  #####################################
 # Pre-define transformation-store array
-transforms = np.zeros((n_frames - 1, 3), np.float32)
+transforms = np.zeros((n_frames - 1, 9), np.float32)
+
+lk_params = dict(winSize=(15, 15),
+                  maxLevel=5,
+                  criteria = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 10, 0.03))
+
 
 for i in range(n_frames):
     # Detect feature points in previous frame
     prev_pts = cv2.goodFeaturesToTrack(prev_gray,
-                                       maxCorners=200,
-                                       qualityLevel=0.01,
-                                       minDistance=30,
-                                       blockSize=5)
+                                       maxCorners=100,
+                                       qualityLevel=0.3,
+                                       minDistance=7,
+                                       blockSize=7)
     # Read next frame
     success, curr = cap.read()
     if not success:
@@ -58,7 +91,7 @@ for i in range(n_frames):
     # Convert to grayscale
     curr_gray = cv2.cvtColor(curr, cv2.COLOR_BGR2GRAY)
     # Calculate optical flow (i.e. track feature points)
-    curr_pts, status, err = cv2.calcOpticalFlowPyrLK(prev_gray, curr_gray, prev_pts, None, maxLevel=9, winSize=(5, 5))
+    curr_pts, status, err = cv2.calcOpticalFlowPyrLK(prev_gray, curr_gray, prev_pts, None, **lk_params)
     # Sanity check
     assert prev_pts.shape == curr_pts.shape
     # Filter only valid points
@@ -66,62 +99,22 @@ for i in range(n_frames):
     prev_pts = prev_pts[idx]
     curr_pts = curr_pts[idx]
     # Find transformation matrix
-    m = cv2.estimateAffine2D(prev_pts, curr_pts)
-    m = m[0] # Extract the affine matrix
-    # Extract traslation
-    dx = m[0, 2]
-    dy = m[1, 2]
-    # Extract rotation angle
-    da = np.arctan2(m[1, 0], m[0, 0])
-    # Store transformation
-    transforms[i] = [dx, dy, da]
-    # Move to next frame
+    H, _ = cv2.findHomography(prev_pts, curr_pts, method=cv2.RANSAC, ransacReprojThreshold=5.0)
+    transforms[i] = H.flatten()
     prev_gray = curr_gray
     print("Frame: " + str(i) + "/" + str(n_frames) + " -  Tracked points : " + str(len(prev_pts)))
 
 
 ###################################### Step 4: Calculate smooth motion between frames ###############################
-SMOOTHING_RADIUS = 10
-def movingAverage(curve, radius):
-  window_size = 2 * radius + 1
-  # Define the filter
-  f = np.ones(window_size)/window_size
-  # Add padding to the boundaries
-  curve_pad = np.lib.pad(curve, (radius, radius), 'edge')
-  # Apply convolution
-  curve_smoothed = np.convolve(curve_pad, f, mode='same')
-  # Remove padding
-  curve_smoothed = curve_smoothed[radius:-radius]
-  # return smoothed curve
-  return curve_smoothed
-
-
-def smooth(trajectory):
-    smoothed_trajectory = np.copy(trajectory)
-    # Filter the x, y and angle curves
-    for i in range(3):
-        smoothed_trajectory[:, i] = movingAverage(trajectory[:, i], radius=SMOOTHING_RADIUS)
-
-    return smoothed_trajectory
-
 # Compute trajectory using cumulative sum of transformations
 trajectory = np.cumsum(transforms, axis=0)
-
 smoothed_trajectory = smooth(trajectory)
-
 # Calculate difference in smoothed_trajectory and trajectory
 difference = smoothed_trajectory - trajectory
 # Calculate newer transformation array
 transforms_smooth = transforms + difference
 
 #################################### Step 5: Apply smoothed camera motion to frames ########################################
-def fixBorder(frame):
-  s = frame.shape
-  # Scale the image 4% without moving the center
-  T = cv2.getRotationMatrix2D((s[1]/2, s[0]/2), 0, 1.04)
-  frame = cv2.warpAffine(frame, T, (s[1], s[0]))
-  return frame
-
 
 # Reset stream to first frame
 cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
@@ -133,27 +126,17 @@ for i in range(n_frames-1):
     if not success:
         break
 
-    # Extract transformations from the new transformation array
-    dx = transforms_smooth[i, 0]
-    dy = transforms_smooth[i, 1]
-    da = transforms_smooth[i, 2]
-
-    # Reconstruct transformation matrix accordingly to new values
-    m = np.zeros((2, 3), np.float32)
-    m[0, 0] = np.cos(da)
-    m[0, 1] = -np.sin(da)
-    m[1, 0] = np.sin(da)
-    m[1, 1] = np.cos(da)
-    m[0, 2] = dx
-    m[1, 2] = dy
-
-    # Apply affine wrapping to the given frame
-    frame_stabilized = cv2.warpAffine(frame, m, (w, h))
+    H_stable = transforms_smooth[i].reshape((3, 3))
+    frame_stabilized = cv2.warpPerspective(frame, H_stable, (w, h))
 
     # Fix border artifacts
     frame_stabilized = fixBorder(frame_stabilized)
     out.write(frame_stabilized)
 
+# Save same size of frames
+out.write(frame_stabilized)
+
+# Clear all capture
 cap.release()
 out.release()
 cv2.destroyAllWindows()
