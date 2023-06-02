@@ -3,7 +3,6 @@ import cv2
 from sklearn.mixture import GaussianMixture
 from joblib import Parallel, delayed
 import matplotlib.pyplot as plt
-import skimage.transform as sk
 
 def get_video_parameters(capture: cv2.VideoCapture) -> dict:
     """Get an OpenCV capture object and extract its parameters.
@@ -21,7 +20,7 @@ def get_video_parameters(capture: cv2.VideoCapture) -> dict:
             "frame_count": frame_count}
 
 def fit_gmm(pixel_data, num_components=3):
-    gmm = GaussianMixture(n_components=num_components, covariance_type='diag', max_iter=30)
+    gmm = GaussianMixture(n_components=num_components, covariance_type='diag', max_iter=90, warm_start=True)
     gmm.fit(pixel_data.reshape(-1, 1))
     return gmm.means_.flatten(), gmm.covariances_.flatten(), gmm.weights_.flatten()
 
@@ -73,14 +72,15 @@ for index, fid in enumerate(frameIds):
     cap.set(cv2.CAP_PROP_POS_FRAMES, fid)
     ret, frame = cap.read()
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    gray = sk.resize(gray, (h_down, w_down), anti_aliasing=True)
+    gray = cv2.resize(gray, (w_down, h_down), interpolation=cv2.INTER_AREA)
     frames[:, :, index] = gray
 
 ######## Now Let's create GMM to every intensity pixel #############
 # Initialize GMM
 num_components = 3
-T = 0.7
-alpha = 0.003
+T = 0.04
+alpha = 0.03 # 30 frames/second
+epsilon = 0.0001
 
 pixel_means, pixel_covariances, pixel_weights = calculate_pixel_gmm(frames, num_components=num_components)
 
@@ -94,28 +94,28 @@ for j in range(n_frames):
     if not success:
         break
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-    gray = sk.resize(gray, (h_down, w_down), anti_aliasing=True)
+    gray = cv2.resize(gray, (w_down, h_down), interpolation=cv2.INTER_AREA)
     gray_array = gray[:, :, np.newaxis].repeat(num_components, axis=2)
     ################# This Part we need to decide how I correspond fore ground and background#############
-    criterion = pixel_weights / np.sqrt(pixel_covariances)
-    # sorted_indices = np.argsort(-criterion, axis=2)
-    # # Compute the cumulative probabilities
-    # accumulated_prob = np.cumsum(np.sort(-criterion) * - 1, axis=2)
-    # # Determine the first B states whose accumulated probability accounts for T
-    # background_indices = np.argmax(accumulated_prob > T, axis=2)
-    # background_mask = np.zeros_like(accumulated_prob, dtype=bool)
-    # for i in range(num_components):
-    #     background_mask[:, :, i] = np.where(background_indices >= i, True, False)
-    # # Combine foreground and background masks across components
-    # foreground = np.logical_not(np.any(background_mask, axis=2)).astype(np.uint8)
-    # background = np.any(background_mask, axis=2).astype(np.uint8)
-    # mask = foreground * 255
+    # Replace negative values
+    pixel_covariances = np.abs(pixel_covariances)
+    criterion = pixel_weights / np.sqrt(pixel_covariances + epsilon)
+    sorted_indices = np.argsort(-criterion, axis=2)
+    # Compute the cumulative probabilities
+    accumulated_prob = np.cumsum(np.sort(-criterion, axis=2) * -1, axis=2)
+    background_indices = np.argmin(accumulated_prob > T, axis=2)
+    background_mask = np.zeros_like(accumulated_prob, dtype=bool)
+    for i in range(num_components):
+        background_mask[:, :, i] = np.where(background_indices >= i, True, False)
+    foreground = np.logical_not(np.any(accumulated_prob > T, axis=2)).astype(np.uint8)
+    background = np.any(accumulated_prob > T, axis=2).astype(np.uint8)
+    mask = foreground * 255
     ######################################################################################################
     # Step 1: calcalute match function
-    Match = np.square(gray_array - pixel_means) / pixel_covariances < (2.5 ** 2)
-    # Build Mask image using creterion
-    mask = ((np.sum(criterion * Match, axis=2) < 0.2)) * 255
+    Match = np.abs(gray_array - pixel_means) < (2.5 * np.sqrt(pixel_covariances))
     mask = mask.astype(np.uint8)
+    mask[0:50, :] = 0
+    mask[250:, :] = 0
     # Step 2: update weights
     pixel_weights = (1 - alpha) * pixel_weights + alpha * Match
     normalize_factor = np.sum(pixel_weights, axis=2)
@@ -126,12 +126,12 @@ for j in range(n_frames):
     pixel_means = (1 - pho) * pixel_means + pho * gray_array
     pixel_covariances = (1 - pho) * pixel_covariances + pho * np.square(gray_array - pixel_means)
     #################### Morphological opreation ######################################################################
-    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
-    # mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+    # mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+    # mask = cv2.erode(mask, kernel, iterations=1)
     # plt.figure(1), plt.imshow(gray, cmap='gray')
     # plt.figure(2), plt.imshow(mask, cmap='gray')
     # plt.show()
-    # x=2
+    # x = 2
     out.write(mask)
 
 

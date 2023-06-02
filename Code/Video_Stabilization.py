@@ -31,7 +31,7 @@ def movingAverage(curve, radius):
   # return smoothed curve
   return curve_smoothed
 
-def smooth(trajectory, n_transform=9, SMOOTHING_RADIUS = 5):
+def smooth(trajectory, n_transform=9, SMOOTHING_RADIUS=9):
     smoothed_trajectory = np.copy(trajectory)
     # Filter the x, y and angle curves
     for i in range(n_transform):
