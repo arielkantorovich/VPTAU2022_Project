@@ -55,9 +55,12 @@ output_video_name = f'../Outputs/{ID1}_{ID2}_binary.avi'
 
 cap = cv2.VideoCapture(input_video_name)
 params = get_video_parameters(cap)
+w, h = params["width"], params["height"]
+w_down, h_down = w//4, h//4
 n_frames = params["frame_count"]
+
 out = cv2.VideoWriter(output_video_name, fourcc=cv2.VideoWriter_fourcc(*'XVID'), fps=params["fps"],
-                      frameSize=(params["width"]//4, params["height"]//4), isColor=False)
+                      frameSize=(w_down, h_down), isColor=False)
 
 
 
@@ -65,7 +68,6 @@ out = cv2.VideoWriter(output_video_name, fourcc=cv2.VideoWriter_fourcc(*'XVID'),
 N_samples = 25
 frameIds = cap.get(cv2.CAP_PROP_FRAME_COUNT) * np.random.uniform(size=N_samples)
 # Store selected frames in an array
-h_down, w_down = params["height"]//4, params["width"]//4
 frames = np.zeros((h_down, w_down, N_samples))
 
 for index, fid in enumerate(frameIds):
@@ -128,6 +130,7 @@ for j in range(n_frames):
     pixel_means = (1 - pho) * pixel_means + pho * gray_array
     pixel_covariances = (1 - pho) * pixel_covariances + pho * np.square(gray_array - pixel_means)
     #################### Morphological opreation ######################################################################
+    # mask = cv2.medianBlur(mask, ksize=5)
     # mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
     # mask = cv2.erode(mask, kernel, iterations=1)
     # plt.figure(1), plt.imshow(gray, cmap='gray')
