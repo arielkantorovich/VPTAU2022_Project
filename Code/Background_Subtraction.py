@@ -1,8 +1,7 @@
 import numpy as np
 import cv2
 import matplotlib.pyplot as plt
-from skimage.measure import label, regionprops
-from scipy.ndimage import binary_fill_holes as binary_fill_holes
+
 
 def get_video_parameters(capture: cv2.VideoCapture) -> dict:
     """Get an OpenCV capture object and extract its parameters.
@@ -19,18 +18,26 @@ def get_video_parameters(capture: cv2.VideoCapture) -> dict:
     return {"fourcc": fourcc, "fps": fps, "height": height, "width": width,
             "frame_count": frame_count}
 
+
+
 def Extract_Large_Object(binary_image):
-    """
-    :param binary_image: ndarray after KNN background subtraction
-    :return: new_binary: ndarray after extract only the largest components
-    """
-    new_binary = np.zeros_like(binary_image, dtype=np.uint8)
-    labeled_image = label(binary_image)
-    regions = regionprops(labeled_image)
-    regions = sorted(regions, key=lambda x: x.area, reverse=True)
-    largest_component = regions[0]
-    new_binary[labeled_image == largest_component.label] = 1
-    return new_binary * 255
+    _, labels = cv2.connectedComponents(binary_image)
+    # Find the largest connected component
+    unique_labels, counts = np.unique(labels, return_counts=True)
+    largest_component_label = unique_labels[np.argmax(counts[1:]) + 1]
+    # Create a mask for the largest component
+    largest_component_mask = np.uint8(labels == largest_component_label)
+    # Apply the mask to the original image to extract the largest component
+    largest_component = cv2.bitwise_and(fgMask, fgMask, mask=largest_component_mask)
+    return largest_component
+
+def fill_holes(image):
+    contours, _ = cv2.findContours(image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours = sorted(contours, key=cv2.contourArea, reverse=True)
+    mask = np.zeros_like(largest_component_mask)
+    cv2.drawContours(mask, [contours[0]], 0, (255), thickness=cv2.FILLED)
+    return mask
+
 
 
 #################### Start session ##########################################################
@@ -44,24 +51,26 @@ cap = cv2.VideoCapture(input_video_name)
 params = get_video_parameters(cap)
 n_frames = params["frame_count"]
 w, h = params["width"], params["height"]
-w_down, h_down = w//2, h//2
+w_down, h_down = w//4, h//4
 
 out = cv2.VideoWriter(output_video_name, fourcc=cv2.VideoWriter_fourcc(*'XVID'), fps=params["fps"],
                       frameSize=(w, h), isColor=False)
 
 # Randomly select N_frames (samples)
-N_samples = 1000
-Thres_KNN = 250
+N_samples = 1500
+Thres_KNN = 310
 frameIds = cap.get(cv2.CAP_PROP_FRAME_COUNT) * np.random.uniform(size=N_samples)
 
 KNN_bg = cv2.createBackgroundSubtractorKNN(history=N_samples, detectShadows=True, dist2Threshold=Thres_KNN)
-# KNN_bg = cv2.createBackgroundSubtractorMOG2(history=N_samples, detectShadows=True, varThreshold=5)
 kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
 
 # Initialize background of N_samples
 for index, fid in enumerate(frameIds):
     cap.set(cv2.CAP_PROP_POS_FRAMES, fid)
     ret, frame = cap.read()
+    # Let's resize to reduce the shake motion
+    frame = cv2.blur(frame, (5, 5))
+    frame = cv2.resize(frame, (w_down, h_down), interpolation=cv2.INTER_AREA)
     KNN_bg.apply(frame)
 
 # Start frame from zero
@@ -70,20 +79,18 @@ for i in range(n_frames):
     success, frame = cap.read()
     if not success:
         break
+    # Let's resize to reduce the shake motion
+    frame = cv2.blur(frame, (5, 5))
+    frame = cv2.resize(frame, (w_down, h_down), interpolation=cv2.INTER_AREA)
+    # Pre Processing gaussian blur
     fgMask = KNN_bg.apply(frame)
     # In this part we remove the shadow
     _, fgMask = cv2.threshold(fgMask, 250, 255, cv2.THRESH_BINARY)
-    # Use morpholgical dilation & Erosion to make more stable binary image
-    fgMask = cv2.erode(fgMask, kernel, iterations=1)
-    fgMask = cv2.dilate(fgMask, kernel, iterations=2)
-    # Extract the walking person
-    new_image = Extract_Large_Object(fgMask)
+    largest_component_mask = Extract_Large_Object(fgMask)
     # Fill contour of the walking person
-    contours, _ = cv2.findContours(fgMask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    contours = sorted(contours, key=cv2.contourArea, reverse=True)
-    mask = np.zeros_like(fgMask)
-    cv2.drawContours(mask, [contours[0]], 0, (255), thickness=cv2.FILLED)
-    # Use morpholgical closing fellowing open
+    mask = fill_holes(largest_component_mask)
     opened_mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+    opened_mask = cv2.morphologyEx(opened_mask, cv2.MORPH_OPEN, kernel)
     closed_mask = cv2.morphologyEx(opened_mask, cv2.MORPH_CLOSE, kernel)
-    out.write(closed_mask)
+    final_results = cv2.resize(closed_mask, (w, h), interpolation=cv2.INTER_CUBIC)
+    out.write(final_results)
