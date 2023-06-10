@@ -1,6 +1,8 @@
-# Import numpy and OpenCV
 import numpy as np
 import cv2
+import timeit
+
+
 
 def get_video_parameters(capture: cv2.VideoCapture) -> dict:
     """Get an OpenCV capture object and extract its parameters.
@@ -31,7 +33,7 @@ def movingAverage(curve, radius):
   # return smoothed curve
   return curve_smoothed
 
-def smooth(trajectory, n_transform=9, SMOOTHING_RADIUS=5):
+def smooth(trajectory, n_transform=9, SMOOTHING_RADIUS = 5):
     smoothed_trajectory = np.copy(trajectory)
     # Filter the x, y and angle curves
     for i in range(n_transform):
@@ -79,7 +81,11 @@ def Finding_Matching_points(prev_img, curr_img):
 
     return prev_pts, curr_pts
 
-print("START VIDEO STABILIZATION PROCESS........")
+
+start = timeit.default_timer()
+
+
+
 
 ###############################################################################################################################
 # Initialize parameters
@@ -159,4 +165,6 @@ cap.release()
 out.release()
 cv2.destroyAllWindows()
 
-print("FINISH VIDEO STABILIZATION PROCESS........")
+stop = timeit.default_timer()
+
+print('Time to video stabilization: ', stop - start)

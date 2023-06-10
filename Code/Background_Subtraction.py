@@ -1,6 +1,6 @@
 import numpy as np
 import cv2
-import matplotlib.pyplot as plt
+import timeit
 
 
 def get_video_parameters(capture: cv2.VideoCapture) -> dict:
@@ -17,8 +17,6 @@ def get_video_parameters(capture: cv2.VideoCapture) -> dict:
     frame_count = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
     return {"fourcc": fourcc, "fps": fps, "height": height, "width": width,
             "frame_count": frame_count}
-
-
 
 def Extract_Large_Object(binary_image):
     _, labels = cv2.connectedComponents(binary_image)
@@ -39,12 +37,15 @@ def fill_holes(image):
     return mask
 
 
+start = timeit.default_timer()
+
 
 #################### Start session ##########################################################
 ID1 = '308345891'
 ID2 = '211670849'
 input_video_name = f'../Outputs/{ID1}_{ID2}_stabilized_video.avi'
 output_video_name = f'../Outputs/{ID1}_{ID2}_binary.avi'
+output_video_name_2 = f'../Outputs/{ID1}_{ID2}_extracted.avi'
 
 
 cap = cv2.VideoCapture(input_video_name)
@@ -53,8 +54,12 @@ n_frames = params["frame_count"]
 w, h = params["width"], params["height"]
 w_down, h_down = w//4, h//4
 
+
 out = cv2.VideoWriter(output_video_name, fourcc=cv2.VideoWriter_fourcc(*'XVID'), fps=params["fps"],
                       frameSize=(w, h), isColor=False)
+out2 = cv2.VideoWriter(output_video_name_2, fourcc=params["fourcc"], fps=params["fps"],
+                      frameSize=(w, h), isColor=True)
+
 
 # Randomly select N_frames (samples)
 N_samples = 1500
@@ -79,6 +84,7 @@ for i in range(n_frames):
     success, frame = cap.read()
     if not success:
         break
+    new_frame = frame.copy()
     # Let's resize to reduce the shake motion
     frame = cv2.blur(frame, (5, 5))
     frame = cv2.resize(frame, (w_down, h_down), interpolation=cv2.INTER_AREA)
@@ -93,4 +99,15 @@ for i in range(n_frames):
     opened_mask = cv2.morphologyEx(opened_mask, cv2.MORPH_OPEN, kernel)
     closed_mask = cv2.morphologyEx(opened_mask, cv2.MORPH_CLOSE, kernel)
     final_results = cv2.resize(closed_mask, (w, h), interpolation=cv2.INTER_CUBIC)
-    out.write(final_results)
+    closed_mask = final_results.astype(np.int32)
+    new_frame[:, :, 0] = closed_mask*new_frame[:, :, 0] / 255
+    new_frame[:, :, 1] = closed_mask*new_frame[:, :, 1] / 255
+    new_frame[:, :, 2] = closed_mask*new_frame[:, :, 2] / 255
+    out.write(closed_mask.astype(np.uint8))
+    out2.write(new_frame.astype(np.uint8))
+
+
+stop = timeit.default_timer()
+
+print('Time to background  subtraction: ', stop - start)
+
