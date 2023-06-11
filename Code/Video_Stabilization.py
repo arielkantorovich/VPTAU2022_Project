@@ -82,10 +82,6 @@ def Finding_Matching_points(prev_img, curr_img):
     return prev_pts, curr_pts
 
 
-start = timeit.default_timer()
-
-
-
 
 ###############################################################################################################################
 # Initialize parameters
@@ -165,6 +161,3 @@ cap.release()
 out.release()
 cv2.destroyAllWindows()
 
-stop = timeit.default_timer()
-
-print('Time to video stabilization: ', stop - start)

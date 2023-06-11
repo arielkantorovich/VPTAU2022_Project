@@ -1,6 +1,5 @@
 import numpy as np
 import cv2
-import timeit
 
 
 def extract_color(i, j, alpha_frame, curr_stab, w, h):
@@ -33,7 +32,6 @@ def get_video_parameters(capture: cv2.VideoCapture) -> dict:
     return {"fourcc": fourcc, "fps": fps, "height": height, "width": width,
             "frame_count": frame_count}
 
-start = timeit.default_timer()
 
 
 ###############################################################################################################################
@@ -125,7 +123,3 @@ out_matted.release()
 out2_alpha.release()
 cv2.destroyAllWindows()
 
-
-stop = timeit.default_timer()
-
-print('Time to video matting: ', stop - start)

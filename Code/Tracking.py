@@ -1,6 +1,5 @@
 import numpy as np
 import cv2
-import timeit
 import json
 
 
@@ -46,7 +45,7 @@ def get_object_bbox(mask_frame):
 
 
 
-start = timeit.default_timer()
+
 data = {}
 #################### Start session ##########################################################
 ID1 = '308345891'
@@ -95,7 +94,5 @@ cv2.destroyAllWindows()
 with open('../Outputs/tracking.json', 'w') as fp:
     json.dump(data, fp, cls=NumpyEncoder)
 
-stop = timeit.default_timer()
 
-print('Time to tracking: ', stop - start)
 

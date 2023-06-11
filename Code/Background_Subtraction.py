@@ -1,6 +1,5 @@
 import numpy as np
 import cv2
-import timeit
 
 
 def get_video_parameters(capture: cv2.VideoCapture) -> dict:
@@ -36,8 +35,6 @@ def fill_holes(image):
     cv2.drawContours(mask, [contours[0]], 0, (255), thickness=cv2.FILLED)
     return mask
 
-
-start = timeit.default_timer()
 
 
 #################### Start session ##########################################################
@@ -107,7 +104,6 @@ for i in range(n_frames):
     out2.write(new_frame.astype(np.uint8))
 
 
-stop = timeit.default_timer()
 
-print('Time to background  subtraction: ', stop - start)
+
 
