@@ -31,7 +31,6 @@ print('Time to video stabilization: ', duration)
 data["time_to_stabilize"] = duration
 
 # Call background subtraction
-start = timeit.default_timer()
 os.system('python Background_Subtraction.py')
 stop = timeit.default_timer()
 duration = stop - start
@@ -39,16 +38,14 @@ print('Time to background  subtraction: ', duration)
 data["time_to_binary"] = duration
 
 # Call Matting
-start = timeit.default_timer()
 os.system('python Matting.py')
 stop = timeit.default_timer()
 duration = stop - start
 print('Time to video matting: ', duration)
 data["time_to_matted"] = duration
-data["time_to_alpha"] = 'Same as Matted we solve them together'
+data["time_to_alpha"] = duration  # Same as Matted we solve them together
 
 # Call Tracking
-start = timeit.default_timer()
 os.system('python Tracking.py')
 stop = timeit.default_timer()
 duration = stop - start
